@@ -115,3 +115,48 @@ window.closeModal = function () {
 //Eeventos para cerrar modal
 if (modalOverlay) modalOverlay.addEventListener('click', window.closeModal);
 if (closeModalBtn) closeModalBtn.addEventListener('click', window.closeModal);
+
+//Manejo de botones
+function handlePrevClick() {
+  if (state.currentPage > 0) {
+    cargarDatos(state.currentPage - 1);
+  }
+}
+function handleNextClick() {
+  const totalPages = Math.ceil(state.totalCount / ITEMS_PER_PAGE);
+  if (state.currentPage < totalPages - 1) {
+    cargarDatos(state.currentPage + 1);
+  }
+}
+
+async function handleTypeSelection(type) {
+  state.loading = true;
+  state.error = null; 
+  state.selectedType = type;
+  state.currentPage = 0;
+  state.searchTerm = ''; 
+  if (searchInput) searchInput.value = '';
+  render();
+
+  try {
+    if (type === 'all') {      
+      const response = await fetch(`${POKE_API_BASE}/pokemon?limit=1`);
+      if (!response.ok) throw new Error('Network response was not ok');
+      const data = await response.json();
+      state.totalCount = data.count;
+      state.pokemonUrlList = [];
+    } else {
+      const response = await fetch(`${POKE_API_BASE}/type/${type}`);
+      if (!response.ok) throw new Error('Network response was not ok');
+      const data = await response.json();    
+      state.pokemonUrlList = data.pokemon.map(p => p.pokemon);
+      state.totalCount = state.pokemonUrlList.length;
+    }
+    await cargarDatos(0);
+  } catch (error) {
+    console.error('Error al manejar cambio de tipo:', error);
+    state.error = "Hubo un error al intentar filtrar por este tipo. Inténtalo de nuevo más tarde.";
+    state.loading = false;
+    render();
+  }
+}
