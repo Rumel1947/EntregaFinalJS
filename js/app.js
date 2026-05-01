@@ -142,12 +142,18 @@ function handleNextClick() {
   }
 }
 
+let debounceTimer;
 /**
  * Función que maneja el cambio en el input de búsqueda
  */
 function handleinputBusqueda(e) {
   estado.terminoBusqueda = e.target.value;
-  render(); // Búsqueda rápida sobre los elementos ya cargados (limpia y vuelve a cargar)
+
+  // Búsqueda global con debounce para evitar múltiples llamadas a la API
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    cargarDatos(0); // Reiniciamos a la página 0 con el nuevo término de búsqueda
+  }, 400);
 }
 
 /**
@@ -164,12 +170,12 @@ async function handleTypeSelection(type) {
 
   try {
     if (type === 'all') {
-      // Para 'all', obtenemos el conteo total primero
-      const response = await fetch(`${URL_API_BASE}/pokemon?limit=1`);
+      // Para 'all', obtenemos todos los pokemon para poder hacer una búsqueda global real
+      const response = await fetch(`${URL_API_BASE}/pokemon?limit=10000`);
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
-      estado.total = data.count;
-      estado.listaUrlsPokemon = [];
+      estado.listaUrlsPokemon = data.results;
+      estado.total = estado.listaUrlsPokemon.length;
     } else {
       const response = await fetch(`${URL_API_BASE}/type/${type}`);
       if (!response.ok) throw new Error('Network response was not ok');
@@ -201,13 +207,22 @@ async function cargarDatos(page) {
     let urlsToFetch = [];
     const offset = page * TARJETAS_POR_PAGINA;
 
-    if (estado.tipoSeleccionado === 'all') {
-      // Orden estándar por ID/Alfabeto
-      urlsToFetch = await fetchlistaUrlsPokemon(TARJETAS_POR_PAGINA, offset);
-    } else {
-      // Subconjunto de la lista filtrada por tipo
-      urlsToFetch = estado.listaUrlsPokemon.slice(offset, offset + TARJETAS_POR_PAGINA);
+    // 1. Aplicamos el filtro de búsqueda global sobre la lista completa de URLs
+    let listaFiltrada = estado.listaUrlsPokemon;
+    if (estado.terminoBusqueda) {
+      const termino = estado.terminoBusqueda.toLowerCase();
+      listaFiltrada = estado.listaUrlsPokemon.filter(p => {
+        // Obtenemos el id de la URL (ej: https://pokeapi.co/api/v2/pokemon/25/)
+        const id = p.url.split('/').filter(Boolean).pop();
+        return p.name.toLowerCase().includes(termino) || id.includes(termino);
+      });
     }
+
+    // 2. Guardamos el total de resultados encontrados para ajustar la paginación
+    estado.totalBusqueda = listaFiltrada.length;
+
+    // 3. Tomamos solo los elementos correspondientes a la página actual
+    urlsToFetch = listaFiltrada.slice(offset, offset + TARJETAS_POR_PAGINA);
 
     // Obtener detalles de cada pokemon en paralelo (await response.json() dentro de fetchPokemonDetails)
     const details = await Promise.all(urlsToFetch.map(p => fetchPokemonDetails(p.url)));
@@ -246,7 +261,9 @@ async function fetchPokemonDetails(url) {
  * Actualiza los elementos de paginación en el DOM
  */
 function updatePaginationUI() {
-  const totalPages = Math.ceil(estado.total / TARJETAS_POR_PAGINA);
+  // Usamos el total filtrado si hay búsqueda activa, si no, el total normal
+  const totalItems = estado.terminoBusqueda ? (estado.totalBusqueda || 0) : estado.total;
+  const totalPages = Math.ceil(totalItems / TARJETAS_POR_PAGINA);
 
   if (paginaActualDisplay) paginaActualDisplay.textContent = estado.paginaActual + 1;
   const totalPagesDisplay = document.getElementById('total-pages');
@@ -292,19 +309,16 @@ function render() {
     return;
   }
 
-  // Filtrado local para la barra de búsqueda (sobre los 15 items actuales)
-  const filtered = estado.todosLosDetalles.filter(pokemon => {
-    return pokemon.name.toLowerCase().includes(estado.terminoBusqueda.toLowerCase()) ||
-      pokemon.id.toString().includes(estado.terminoBusqueda);
-  });
+  // Los datos ya vienen filtrados por cargarDatos(), solo renderizamos
+  const listToRender = estado.todosLosDetalles;
 
-  if (filtered.length === 0) {
-    contenedorResultados.innerHTML = '<div class="col-span-full text-center py-20 text-white/40 font-bold uppercase tracking-widest text-xs">No se encontraron resultados.</div>';
+  if (listToRender.length === 0) {
+    contenedorResultados.innerHTML = '<div class="col-span-full text-center py-20 text-white/40 font-bold uppercase tracking-widest text-xs">No se encontraron resultados para tu búsqueda.</div>';
     return;
   }
 
   // Generación de tarjetas mediante template literals e inserción masiva
-  contenedorResultados.innerHTML = filtered.map(pokemon => {
+  contenedorResultados.innerHTML = listToRender.map(pokemon => {
     const primaryType = pokemon.types[0].type.name;
     const typeConfigs = {
       fire: 'from-orange-900/20 hover:border-orange-500/50',
